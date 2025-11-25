@@ -4,12 +4,15 @@ from rest_framework.response import Response
 from django.contrib.auth import authenticate, login, logout
 from django.shortcuts import get_object_or_404
 from django.db.models import Q
+from django.views.decorators.csrf import csrf_exempt
 from .models import User, Post, Comment, Like, CommentLike, Follow
 from .serializers import (
     UserRegistrationSerializer, UserSerializer, PostSerializer, 
     CommentSerializer
 )
 
+
+# API root
 @api_view(['GET'])
 def api_root(request):
     return Response({
@@ -24,30 +27,42 @@ def api_root(request):
         }
     })
 
-# Authentication
+
+# AUTHENTICATION
+
+# Registration
 class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     serializer_class = UserRegistrationSerializer
     permission_classes = [permissions.AllowAny]
 
+
+# Login
+@csrf_exempt
 @api_view(['POST'])
 @permission_classes([permissions.AllowAny])
 def login_view(request):
     username = request.data.get('username')
     password = request.data.get('password')
-    
+
+    if not username or not password:
+        return Response({'error': 'Username and password required'}, status=400)
+
     user = authenticate(username=username, password=password)
     if user:
         login(request, user)
         return Response(UserSerializer(user).data)
     return Response({'error': 'Invalid credentials'}, status=400)
 
+
+# Logout
 @api_view(['POST'])
 def logout_view(request):
     logout(request)
     return Response({'message': 'Logged out successfully'})
 
-# Profiles
+
+# PROFILES
 class ProfileDetailView(generics.RetrieveUpdateAPIView):
     queryset = User.objects.all()
     serializer_class = UserSerializer
@@ -58,7 +73,8 @@ class ProfileDetailView(generics.RetrieveUpdateAPIView):
         context['request'] = self.request
         return context
 
-# Posts
+
+# POSTS
 class PostListView(generics.ListCreateAPIView):
     serializer_class = PostSerializer
 
@@ -77,6 +93,7 @@ class PostListView(generics.ListCreateAPIView):
         context['request'] = self.request
         return context
 
+
 class PostDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Post.objects.all()
     serializer_class = PostSerializer
@@ -86,7 +103,8 @@ class PostDetailView(generics.RetrieveUpdateDestroyAPIView):
         context['request'] = self.request
         return context
 
-# Comments
+
+# COMMENTS
 class CommentListView(generics.ListCreateAPIView):
     serializer_class = CommentSerializer
 
@@ -98,75 +116,84 @@ class CommentListView(generics.ListCreateAPIView):
         post = get_object_or_404(Post, id=self.kwargs['post_id'])
         serializer.save(user=self.request.user, post=post)
 
+
 class CommentDetailView(generics.RetrieveUpdateDestroyAPIView):
     queryset = Comment.objects.all()
     serializer_class = CommentSerializer
 
-# Likes
+
+
+# LIKES
 @api_view(['POST', 'DELETE'])
 def post_like_view(request, post_id):
     post = get_object_or_404(Post, id=post_id)
-    
+
     if request.method == 'POST':
         like, created = Like.objects.get_or_create(user=request.user, post=post)
         if created:
             return Response({'message': 'Post liked'}, status=201)
         return Response({'error': 'Already liked'}, status=400)
-    
+
     elif request.method == 'DELETE':
         Like.objects.filter(user=request.user, post=post).delete()
         return Response({'message': 'Post unliked'})
 
+
 @api_view(['POST', 'DELETE'])
 def comment_like_view(request, comment_id):
     comment = get_object_or_404(Comment, id=comment_id)
-    
+
     if request.method == 'POST':
         like, created = CommentLike.objects.get_or_create(user=request.user, comment=comment)
         if created:
             return Response({'message': 'Comment liked'}, status=201)
         return Response({'error': 'Already liked'}, status=400)
-    
+
     elif request.method == 'DELETE':
         CommentLike.objects.filter(user=request.user, comment=comment).delete()
         return Response({'message': 'Comment unliked'})
 
-# Follow
+
+
+# FOLLOW
 @api_view(['POST', 'DELETE'])
 def follow_user(request, user_id):
     user_to_follow = get_object_or_404(User, id=user_id)
-    
+
     if request.method == 'POST':
         if request.user == user_to_follow:
             return Response({'error': 'Cannot follow yourself'}, status=400)
-        
+
         follow, created = Follow.objects.get_or_create(
-            follower=request.user, 
+            follower=request.user,
             following=user_to_follow
         )
         if created:
             return Response({'message': f'Now following {user_to_follow.username}'}, status=201)
         return Response({'error': 'Already following'}, status=400)
-    
+
     elif request.method == 'DELETE':
         Follow.objects.filter(follower=request.user, following=user_to_follow).delete()
         return Response({'message': f'Unfollowed {user_to_follow.username}'})
 
-# Search
+
+
+# SEARCH
 @api_view(['GET'])
 def search_users(request):
     query = request.GET.get('query', '')
     if query:
         users = User.objects.filter(
-            Q(username__icontains=query) | 
-            Q(first_name__icontains=query) | 
+            Q(username__icontains=query) |
+            Q(first_name__icontains=query) |
             Q(last_name__icontains=query)
         )
         serializer = UserSerializer(users, many=True)
         return Response(serializer.data)
     return Response([])
 
-# News Feed
+
+# NEWS FEED
 @api_view(['GET'])
 def news_feed(request):
     if request.user.is_authenticated:
